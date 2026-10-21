@@ -53,9 +53,9 @@ node tools/smoke.mjs     # 7 checks, <1 s
 
 | Area | Contents |
 | --- | --- |
-| **Management office** (left end, 12 × 18 m, 2 floors) | Reception, glass meeting room, archive, toilets; three glass-partitioned manager rooms, admin room with four desks, coffee pantry, server cabinet; balconies facing the rack aisle; a live courier-dispatch board with running clock and rotating rows |
+| **Management office** (left end, 12 × 18 m, 2 floors) | Reception, glass meeting room, archive, toilets; three glass-partitioned manager rooms, admin room with four desks, coffee pantry, server cabinet; balconies facing the rack aisle; a live courier-dispatch board with running clock and rotating rows; a **clickable workflow board** in the ground-floor lobby |
 | **Storage hall** | Two rows of blue pallet racks, orange beams, 15 bays × 5 levels to 8.9 m; three rows of light picking shelves; two rows of sorting tables; cardboard backdrop taken from the reference photo |
-| **Conveyor** | One main belt with a barcode scanner head, branching into seven dispatch lanes that descend as gravity roller beds to the dock edge; 130 parcels circulating as a single `InstancedMesh` |
+| **Conveyor** | One main belt with a **barcode scan station** — laser curtain, status beacon, signal lens and operator screen — where every parcel's lane is decided; seven dispatch lanes descending as gravity roller beds to the dock edge; 130 parcels circulating as a single `InstancedMesh` |
 | **Dispatch docks** (front/lower end) | Motorcycle courier parking with blue floor zone; van/car bays with orange zone and yellow bollards; asphalt yard, lane markings, directional arrows, guard post, fence and gates |
 | **Safety layer** | Green evacuation routes with arrows to three assembly points, 6 × fire extinguisher + hydrant cabinets, ceiling sprinkler grid (4 red pipe runs + risers + valve panel), two emergency exits with lit KELUAR signs, yellow/black forklift lanes with two patrolling forklifts |
 | **Genset house** (right end, outside the wall) | 5 × 2.7 × 3.1 m concrete shelter with yellow plaster, double louvre doors, downlights, garden and palms; inside, a teal V-GEN canopy genset modelled from a photo — engine, alternator, radiator, turbo, heat-wrapped exhaust with roof penetration, battery, junction box, cable run to the main panel |
@@ -72,6 +72,8 @@ node tools/smoke.mjs     # 7 checks, <1 s
 - **Rain** — 5,000 GPU line segments per world, spawned *outside* the roof footprint (respects both dock layouts) so rain never falls indoors, even with the roof transparent.
 - **A | B comparison** — splits the canvas with `setScissorTest`, building a **second complete world** with the alternate dock layout (dock-below vs dock-at-side) and sharing one camera, weather and settings.
 - **Layer switches** — 10 model layers (steel frame, racks, shelves, sorting tables, conveyor, vehicles, people, lamps, signs, site) and 6 safety layers, all on by default.
+- **Scan station** — parcels travel the shared belt *unassigned*; the lane is decided only when a parcel crosses the laser curtain. The operator screen shows the barcode, destination, armada and the lane it was routed to, and the **Conveyor** tab keeps a scrolling log of the last five scans plus per-lane throughput bars.
+- **Workflow board** — a large board in the office lobby draws the seven stages of the operation (penerimaan → sortir → scan → conveyor → jalur → muat → kirim) with live numbers. Click it in 3D to open the interactive **Alur kerja** panel, pick a stage and the camera flies to that zone.
 - **Genset doors** — 7 doors (canopy engine/alternator/control/back-left/back-right + two shelter louvre doors), openable from the panel or by clicking them in 3D, with eased swing animation and clickable hit-testing.
 - **Light/dark theme** following `prefers-color-scheme`, with an explicit `data-theme` override.
 
@@ -153,9 +155,9 @@ A|B comparison cheap to keep in sync.
 
 | Metric | Value |
 | --- | --- |
-| File size | 224,378 bytes (219 KB), **one** HTTP document |
+| File size | 245,494 bytes (240 KB), **one** HTTP document |
 | Lines | 3,134 |
-| Inline JS | ~204 KB across 5 blocks |
+| Inline JS | ~225 KB across 5 blocks |
 | Inline CSS | ~7 KB |
 | Inline image data | 18.2 KB base64 ≈ 13.4 KB JPEG |
 | External assets | 2 (Three.js r128, Google Fonts) |
@@ -270,7 +272,7 @@ that the file is monolithic (see §6).
   image, plain global function blocks). It is preserved byte-for-byte in `index.html`;
   no code was modified in this commit.
 
-## 9. Performance pass (this revision)
+## 9. Performance pass
 
 The render loop was the single biggest cost in the page and the biggest reason it felt
 heavy on phones. Five findings from §6 are addressed here; nothing about the visual
@@ -374,3 +376,68 @@ Still open from §6: `F2` (no CDN fallback), `F6` (duplicated functions), `F7`
 (`prefers-reduced-motion`), `F9` (tab ARIA wiring), `F10` (SRI / Three.js version).
 `antialias` remains on and the ACES tone-mapping pipeline is untouched — both are
 quality decisions rather than performance bugs, and the DPR cap already bounds their cost.
+
+## 10. Scan-to-route and the workflow board
+
+### 10.1 A real decision point on the belt
+
+Before this revision, parcels were assigned a lane at spawn time (`p.lane = Math.floor(rnd() * NL)`) — the "scanner" was decorative geometry with a red strip. Now the routing decision happens where it should:
+
+```
+parcel spawns with lane = -1  ──▶  travels the shared trunk belt
+                                         │
+                              crosses laser curtain at x = -12
+                                         │
+                              scanParcel(): picks a destination,
+                              sets the lane, logs the barcode
+                                         ▼
+                              PATH OF LANE 1…7 → dock
+```
+
+- `p.lane = -1` means *not yet assigned*. `pathOf(p)` returns the single shared trunk path for those parcels, so an unassigned parcel only ever travels left-to-right.
+- The trunk path is `[[TX0, TZ], [SX, TZ]]`; `SCAN_S` is its length. A parcel triggers the scan on the **rising edge** (`from < SCAN_S && p.s >= SCAN_S`), so it fires once.
+- `scanParcel()` picks a destination, sets `lane`, increments `SIM.scan` and `SIM.laneScan[lane]`, and pushes a record `{ code, dest, lane, at, no }` onto `SIM.scanLog` (max 8).
+- When a parcel finishes its lane it is delivered and **returned to the trunk unassigned** (`lane = -1`), so it must be scanned again for its next trip. That keeps the scanner meaningful in a continuous loop rather than a one-off.
+
+Destinations (`DEST`) map to lanes the way the floor markings already did — J1–J3 motorcycle, J4–J7 van/car:
+
+| Lane | Code | Destination | Armada |
+| --- | --- | --- | --- |
+| J1 | JKT-PST | Jakarta Pusat | Motor |
+| J2 | JKT-SEL | Jakarta Selatan | Motor |
+| J3 | BKS | Bekasi | Motor |
+| J4 | BDG | Bandung | Van |
+| J5 | SBY | Surabaya | Van |
+| J6 | SMG | Semarang | Mobil |
+| J7 | YGY | Yogyakarta | Mobil |
+
+The station itself (`SX = -12`) is a gantry over the belt: posts, crossbar, camera housing, signal lens, status beacon and a 0.9 × 0.56 m operator screen. The laser curtain is a `PlaneGeometry` whose material is animated every frame — idle it breathes red, and for ~0.4 s after a scan it flashes green, as do the lens and the beacon. Nothing here is a static texture.
+
+The **Conveyor** tab gained a *Stasiun scan* block: a status pill (`Menunggu paket` / `Scan OK`), the running scan count, the last five barcodes with destination and lane, and per-lane bars driven by `SIM.laneScan`. It polls only when the scan count changes or every 450 ms, so the live feed costs nothing on the render loop you optimised in §9.
+
+### 10.2 The workflow board
+
+A 4.4 × 2.3 m live board sits on the north wall of the office core at x −25.75, z −11.94, above the lobby, drawn by `wfDraw()` into a 1024 × 320 canvas texture and refreshed through the same `tickLive()` path as the dispatch and CCTV screens.
+
+It shows seven stages with live values: queue on the belt, parcels in racks, scan count, delivered count, fleet size, and the simulation clock. Stage 03 lights up green in sync with the scan flash, so the board visibly reacts to the machine.
+
+**Clicking it in 3D** opens the interactive panel (`#flow`), a modal listing the same seven stages. Each row is a button: `focusZone()` flies the camera to that stage's zone. The board is raycast in `hitWorkflow()` using the same `aimRay()` helper as the genset doors, so picking works correctly in A|B split mode too. The cursor turns into a pointer over it, and the workflow zone's info card exposes a *Buka alur* button for touch users who would rather not hunt for the screen.
+
+Escape or a click on the backdrop closes the panel. All UI strings are Indonesian, matching the rest of the page.
+
+### 10.3 Debug hooks and tests
+
+```js
+GP3D.scan()        // { count, log, laneScan, dests, delivered, clock, queue }
+GP3D.workflowMesh()// the clickable board mesh
+GP3D.openFlow()    // programmatic open/close
+GP3D.flowOpen()
+```
+
+`tools/smoke.mjs` grew from 7 to 10 checks, including the one that matters:
+
+```
+ok   parcels are scanned before a lane is chosen
+```
+
+It runs the simulation for ~70 s of fake time and asserts that scans happened, that every scan record has a well-formed `PKG-nnnnn` code, a destination and an in-range lane, that `lane === dest.lane`, that the per-lane counters sum exactly to the scan total, and that deliveries still complete. The canvas artwork was checked separately against a strict 2D-context stub that throws on unknown members and non-finite coordinates.

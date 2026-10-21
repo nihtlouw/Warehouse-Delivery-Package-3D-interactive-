@@ -53,6 +53,36 @@ button,input{font:inherit;color:inherit}
 .hint{position:absolute;right:max(16px,env(safe-area-inset-right,0px));bottom:12px;font:400 11px/1.3 var(--f-mono);color:var(--mut);text-align:right;pointer-events:none}
 @media (max-width:860px){.hint{display:none}.title h1{font-size:22px}}
 .nogl{position:absolute;inset:0;margin:auto;max-width:320px;height:fit-content;text-align:center;color:var(--mut)}
+/* panel alur kerja: dibuka dari monitor di kantor atau dari info zona */
+.flow{position:absolute;inset:0;z-index:9;display:flex;align-items:center;justify-content:center;padding:18px;
+  background:rgba(8,16,22,.52);backdrop-filter:blur(3px)}
+.flow[hidden]{display:none}
+.flow-card{width:min(580px,100%);max-height:100%;overflow:auto;background:var(--panel);border:1px solid var(--line);
+  box-shadow:0 20px 60px rgba(0,0,0,.4);padding:16px 18px 18px}
+.flow-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.flow-head .kind{margin:0;font:600 10.5px/1 var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+.flow-head h2{margin:6px 0 0;font:700 24px/1.05 var(--f-display);letter-spacing:.03em;text-transform:uppercase}
+.flow-lead{margin:10px 0 12px;color:var(--mut);font-size:13px}
+.flow-list{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
+.flow-list li{border-bottom:1px solid var(--line)}
+.flow-step{width:100%;display:flex;gap:12px;align-items:center;border:0;background:transparent;padding:10px 4px;text-align:left;cursor:pointer;font:inherit;color:inherit}
+.flow-step:hover{background:var(--chip)}
+.flow-step:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.flow-step .n{flex:none;width:28px;font:700 13px/1 var(--f-mono);color:var(--accent)}
+.flow-step .t{display:block;font-weight:600}
+.flow-step .d{display:block;font:400 11.5px/1.35 var(--f-mono);color:var(--mut)}
+.flow-step .go{flex:none;font:600 10px/1 var(--f-mono);text-transform:uppercase;letter-spacing:.06em;color:var(--accent)}
+.flow-foot{margin:12px 0 0;padding-top:10px;border-top:1px solid var(--line);font:500 11px/1.6 var(--f-mono);color:var(--mut)}
+/* stasiun scan di tab Conveyor */
+.pill{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border:1px solid var(--line);background:var(--chip);
+  font:600 10px/1 var(--f-mono);letter-spacing:.08em;text-transform:uppercase;transition:background .2s,color .2s,border-color .2s}
+.pill.on{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.scan-top{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:0 0 8px}
+.lanebars{display:flex;gap:5px;align-items:flex-end;height:58px;margin:10px 0 0}
+.lanebars div{flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:3px;text-align:center}
+.lanebars i{display:block;background:var(--accent);min-height:2px;transition:height .3s}
+.lanebars b{font:600 9px/1 var(--f-mono);color:var(--mut)}
+@media (max-width:860px){.flow{padding:10px}.flow-card{padding:12px 12px 14px}.flow-head h2{font-size:20px}}
 
 #calloutLayer{position:absolute;inset:0;overflow:hidden;pointer-events:none}
 .co{position:absolute;left:0;top:0;pointer-events:auto;cursor:pointer;white-space:nowrap;
@@ -161,9 +191,23 @@ input[type=range]{width:100%;margin:4px 0 10px;accent-color:var(--accent)}
     </div>
     <aside class="info" id="info" hidden>
       <p class="kind" id="infoKind"></p><h2 id="infoName"></h2><p class="txt" id="infoText"></p>
-      <div class="acts"><button class="btn pri" id="infoFocus" type="button">Dekati</button><button class="btn" id="infoClose" type="button">Tutup</button></div>
+      <div class="acts"><button class="btn pri" id="infoFocus" type="button">Dekati</button><button class="btn" id="infoFlow" type="button" hidden>Buka alur</button><button class="btn" id="infoClose" type="button">Tutup</button></div>
     </aside>
-    <div class="hint">Seret untuk memutar · gulir atau cubit untuk zoom<br>Shift + seret atau dua jari untuk menggeser · klik pintu genset untuk membukanya</div>
+    <div class="hint">Seret untuk memutar · gulir atau cubit untuk zoom<br>Shift + seret atau dua jari untuk menggeser · klik pintu genset atau monitor di kantor</div>
+    <div class="flow" id="flow" hidden role="dialog" aria-modal="true" aria-labelledby="flowTitle">
+      <div class="flow-card">
+        <div class="flow-head">
+          <div>
+            <p class="kind">Kantor manajemen · monitor alur kerja</p>
+            <h2 id="flowTitle">Alur kerja gudang</h2>
+          </div>
+          <button class="btn" id="flowClose" type="button">Tutup</button>
+        </div>
+        <p class="flow-lead">Tujuh tahap dari dermaga terima sampai kurir keluar gerbang. Pilih satu tahap untuk terbang ke zonanya.</p>
+        <ol class="flow-list" id="flowList"></ol>
+        <p class="flow-foot" id="flowFoot"></p>
+      </div>
+    </div>
   </main>
   <section class="panel" aria-label="Kontrol">
     <div class="tabs" role="tablist">
@@ -212,6 +256,11 @@ input[type=range]{width:100%;margin:4px 0 10px;accent-color:var(--accent)}
         <ul class="rows"><li><span class="row-name">Jalankan conveyor</span><label class="sw"><input type="checkbox" id="convOn" checked aria-label="Jalankan conveyor"><span class="sw-ui"></span></label></li></ul>
         <div class="sliderrow" style="margin-top:12px"><label for="speed">Kecepatan</label><output id="speedVal" for="speed">1,1 m/dtk</output></div>
         <input type="range" id="speed" min="20" max="250" step="5" value="110">
+        <h3>Stasiun scan</h3>
+        <div class="scan-top"><span class="pill" id="scanPill">Menunggu paket</span><span class="num"><span id="scanCount">0</span> terpindai</span></div>
+        <ul class="rows" id="scanLog"></ul>
+        <div class="lanebars" id="laneBars" aria-hidden="true"></div>
+        <p class="note">Tirai laser di atas sabuk induk, sebelum cabang pertama. Di titik itu jalur 1–7 diputuskan, bukan di ujung sabuk.</p>
         <h3>Isi gudang</h3>
         <ul class="rows" id="statList"></ul>
       </div>
@@ -1549,7 +1598,23 @@ function buildWarehouse(T, opts) {
     if (PHOTO[k] && im.addEventListener) { im.onload = function () { im._ok = true; redraw(); if (opts.onPhoto) opts.onPhoto(); }; im.src = PHOTO[k]; }
     return im;
   }
-  var SIM = { min: 480, delivered: 0, laneDone: [0, 0, 0, 0, 0, 0, 0], queue: 0 };
+  var SIM = {
+    min: 480, delivered: 0, laneDone: [0, 0, 0, 0, 0, 0, 0], queue: 0,
+    scan: 0, scanLog: [], laneScan: [0, 0, 0, 0, 0, 0, 0], rejected: 0
+  };
+  /* Tujuan per jalur: tiga jalur motor (J1..J3) dan empat jalur van/mobil (J4..J7). */
+  var DEST = [
+    { code: 'JKT-PST', name: 'Jakarta Pusat', lane: 0, arm: 'Motor' },
+    { code: 'JKT-SEL', name: 'Jakarta Selatan', lane: 1, arm: 'Motor' },
+    { code: 'BKS', name: 'Bekasi', lane: 2, arm: 'Motor' },
+    { code: 'BDG', name: 'Bandung', lane: 3, arm: 'Van' },
+    { code: 'SBY', name: 'Surabaya', lane: 4, arm: 'Van' },
+    { code: 'SMG', name: 'Semarang', lane: 5, arm: 'Mobil' },
+    { code: 'YGY', name: 'Yogyakarta', lane: 6, arm: 'Mobil' }
+  ];
+  var scanFlash = 0, scanSeen = 0;   /* kilatan stasiun scan, dipakai layar dan lampu */
+  function scanDest(p) { return p.dest || DEST[p.lane < 0 ? 0 : (p.lane % 7)]; }
+  function lastScan() { return SIM.scanLog.length ? SIM.scanLog[0] : null; }
   var live = [], liveAcc = 0;
   function liveTex(w, h, draw) {
     var c = document.createElement('canvas'); c.width = w; c.height = h;
@@ -1617,7 +1682,128 @@ function buildWarehouse(T, opts) {
     g.textAlign = 'right'; g.fillText(hhmm(SIM.min), w - 10, h - 14);
     g.fillStyle = '#ff4a3a'; g.beginPath(); g.arc(w - 18, 16, 5, 0, 6.3); g.fill();
   }
+  /* Layar stasiun scan: paket terakhir, tujuan, jalur yang diputuskan. */
+  function scanDraw(g, w, h) {
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.fillStyle = '#08151a'; g.fillRect(0, 0, w, h);
+    g.fillStyle = '#0d3b46'; g.fillRect(0, 0, w, 40);
+    g.textBaseline = 'middle'; g.textAlign = 'left';
+    g.fillStyle = '#dff7ff'; g.font = '700 21px "Barlow Condensed","Arial Narrow",sans-serif';
+    g.fillText('STASIUN SCAN 01', 12, 20);
+    g.textAlign = 'right'; g.fillStyle = '#7fd4e2'; g.font = '600 13px "IBM Plex Mono",monospace';
+    g.fillText('CONVEYOR UTAMA', w - 12, 20);
+
+    var L = lastScan();
+    if (!L) {
+      g.textAlign = 'center'; g.fillStyle = '#5d8b95'; g.font = '600 20px "IBM Plex Mono",monospace';
+      g.fillText('MENUNGGU PAKET', w / 2, h / 2);
+      g.fillStyle = (Math.floor(SIM.min * 2) % 2) ? '#6fe3a0' : '#12383a';
+      g.beginPath(); g.arc(w / 2, h / 2 + 34, 6, 0, 6.3); g.fill();
+      return;
+    }
+    var d = L.dest, motor = d.lane < 3;
+    g.textAlign = 'left'; g.fillStyle = '#7fa6b5'; g.font = '600 12px "IBM Plex Mono",monospace';
+    g.fillText('PAKET', 12, 62);
+    g.fillStyle = '#ffffff'; g.font = '700 30px "IBM Plex Mono",monospace';
+    g.fillText(L.code, 12, 88);
+
+    g.fillStyle = '#7fa6b5'; g.font = '600 12px "IBM Plex Mono",monospace'; g.fillText('TUJUAN', 12, 118);
+    g.fillStyle = '#eaf8ff'; g.font = '700 26px "Barlow Condensed","Arial Narrow",sans-serif';
+    g.fillText(d.name.toUpperCase(), 12, 140);
+
+    /* lencana jalur */
+    var bw = 92, bh = 68, bx0 = w - bw - 12, by0 = 56;
+    g.fillStyle = motor ? '#1e5fae' : '#c26a12'; g.fillRect(bx0, by0, bw, bh);
+    g.fillStyle = 'rgba(255,255,255,0.16)'; g.fillRect(bx0, by0, bw, 18);
+    g.textAlign = 'center'; g.fillStyle = '#cfe8ff'; g.font = '600 11px "IBM Plex Mono",monospace';
+    g.fillText('JALUR', bx0 + bw / 2, by0 + 10);
+    g.fillStyle = '#ffffff'; g.font = '800 32px "Barlow Condensed","Arial Narrow",sans-serif';
+    g.fillText('J' + (d.lane + 1), bx0 + bw / 2, by0 + 40);
+    g.fillStyle = '#cfe8ff'; g.font = '600 11px "IBM Plex Mono",monospace';
+    g.fillText(d.arm.toUpperCase(), bx0 + bw / 2, by0 + bh - 7);
+
+    /* panah rute */
+    g.strokeStyle = '#3ee0a0'; g.lineWidth = 3; g.lineCap = 'round';
+    var ax = 12, ay = 168;
+    g.beginPath(); g.moveTo(ax, ay); g.lineTo(ax + 46, ay); g.stroke();
+    g.beginPath(); g.moveTo(ax + 40, ay - 6); g.lineTo(ax + 48, ay); g.lineTo(ax + 40, ay + 6); g.stroke();
+    g.textAlign = 'left'; g.fillStyle = '#3ee0a0'; g.font = '600 13px "IBM Plex Mono",monospace';
+    g.fillText('RUTE DIKIRIM KE JALUR ' + (d.lane + 1), ax + 58, ay);
+
+    /* footer */
+    g.fillStyle = '#0d3b46'; g.fillRect(0, h - 34, w, 34);
+    g.fillStyle = '#9fd0ff'; g.font = '600 12px "IBM Plex Mono",monospace'; g.textAlign = 'left';
+    g.fillText('TERPINDAI ' + SIM.scan, 12, h - 17);
+    g.textAlign = 'right';
+    g.fillStyle = (scanFlash > 0.2 || Math.floor(SIM.min * 2) % 2) ? '#6fe3a0' : '#2a5a52';
+    g.fillText('● SCAN OK', w - 12, h - 17);
+
+    if (scanFlash > 0.02) {
+      g.strokeStyle = 'rgba(110,227,160,' + (0.85 * scanFlash).toFixed(2) + ')';
+      g.lineWidth = 5; g.strokeRect(2.5, 2.5, w - 5, h - 5);
+    }
+  }
+
+  /* Papan alur kerja di kantor manajemen: tujuh tahap, angka hidup. */
+  var FLOW_STEPS = [
+    { n: '01', t: 'PENERIMAAN', s: 'Dermaga terima', z: 'yard', v: function () { return SIM.queue; }, u: 'di conveyor' },
+    { n: '02', t: 'SORTIR', s: 'Meja sortir', z: 'tables', v: function () { return stats.parcels; }, u: 'paket di rak' },
+    { n: '03', t: 'SCAN', s: 'Barcode dibaca', z: 'scanner', v: function () { return SIM.scan; }, u: 'terpindai' },
+    { n: '04', t: 'CONVEYOR', s: 'Sabuk induk', z: 'conveyor', v: function () { return SIM.queue; }, u: 'paket berjalan' },
+    { n: '05', t: 'JALUR 1-7', s: 'Dispatch', z: 'lanes', v: function () { return SIM.delivered; }, u: 'terkirim' },
+    { n: '06', t: 'MUAT', s: 'Kurir & muat', z: 'dockMoto', v: function () { return stats.bikes + stats.vans + stats.cars; }, u: 'armada' },
+    { n: '07', t: 'KIRIM', s: 'Gerbang keluar', z: 'yard', v: function () { return SIM.min; }, u: 'menit' }
+  ];
+  function wfDraw(g, w, h) {
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.fillStyle = '#081420'; g.fillRect(0, 0, w, h);
+    g.fillStyle = '#123a5c'; g.fillRect(0, 0, w, 64);
+    g.textBaseline = 'middle'; g.textAlign = 'left'; g.fillStyle = '#ffffff';
+    g.font = '800 40px "Barlow Condensed","Arial Narrow",sans-serif';
+    g.fillText('ALUR KERJA GUDANG', 24, 33);
+    g.textAlign = 'right'; g.fillStyle = '#8fc4e8'; g.font = '600 22px "IBM Plex Mono",monospace';
+    g.fillText('TATA LETAK ' + (SIDE ? 'B' : 'A') + ' · ' + hhmm(SIM.min), w - 24, 33);
+
+    var n = FLOW_STEPS.length, gap = 14;
+    var cw = (w - 48 - gap * (n - 1)) / n, chh = 174, y0 = 78, pad = 12;
+    FLOW_STEPS.forEach(function (st, i) {
+      var x = 24 + i * (cw + gap);
+      var hot = st.n === '03' && scanFlash > 0.15;
+      g.fillStyle = hot ? '#14523c' : '#0e2436'; g.fillRect(x, y0, cw, chh);
+      g.fillStyle = hot ? '#3ee0a0' : '#1f6f9c'; g.fillRect(x, y0, cw, 6);
+
+      g.textAlign = 'left';
+      g.fillStyle = hot ? '#8dffc4' : '#5d9dc4';
+      g.font = '600 14px "IBM Plex Mono",monospace'; g.fillText(st.n, x + pad, y0 + 26);
+
+      g.fillStyle = '#eaf6ff';
+      fitText(g, st.t, x + pad, y0 + 56, cw - pad * 2, '800 % "Barlow Condensed","Arial Narrow",sans-serif', 24);
+
+      g.fillStyle = '#7fa6bd';
+      fitText(g, st.s, x + pad, y0 + 80, cw - pad * 2, '500 % "IBM Plex Mono",monospace', 12);
+
+      g.fillStyle = hot ? '#8dffc4' : '#ffcc66';
+      fitText(g, String(Math.round(st.v())), x + pad, y0 + 128, cw - pad * 2, '800 % "Barlow Condensed","Arial Narrow",sans-serif', 48);
+
+      g.fillStyle = '#6f93a8';
+      fitText(g, st.u, x + pad, y0 + 153, cw - pad * 2, '500 % "IBM Plex Mono",monospace', 11);
+
+      if (i < n - 1) {
+        g.strokeStyle = '#2f6d92'; g.lineWidth = 3; g.lineCap = 'round';
+        var mx = x + cw + gap / 2, my = y0 + chh / 2;
+        g.beginPath(); g.moveTo(mx - 3, my); g.lineTo(mx + 2, my); g.stroke();
+      }
+    });
+
+    g.fillStyle = '#0d2334'; g.fillRect(0, h - 52, w, 52);
+    g.textAlign = 'left'; g.fillStyle = '#8fc4e8'; g.font = '600 17px "IBM Plex Mono",monospace';
+    g.fillText('Klik layar ini untuk membuka alur kerja interaktif', 24, h - 26);
+    g.textAlign = 'right'; g.fillStyle = '#ffcc66';
+    g.fillText('PAKET TERKIRIM ' + SIM.delivered + ' · TERPINDAI ' + SIM.scan, w - 24, h - 26);
+  }
+
   var dashTex = liveTex(512, 288, dashDraw), schedTex = liveTex(1024, 512, schedDraw), cctvTex = liveTex(384, 216, cctvDraw);
+  var scanTex = liveTex(384, 240, scanDraw), wfTex = liveTex(1024, 320, wfDraw);
   var SCR = [dashTex, cctvTex, dashTex].map(function (t) { return new T.MeshBasicMaterial({ map: t, toneMapped: false }); });
   var SCRG = new T.PlaneGeometry(0.46, 0.26);
   function tickLive(dt, force) {
@@ -2030,14 +2216,23 @@ function buildWarehouse(T, opts) {
   // layar, papan jadwal kurir, resepsionis dan pantri
   var tvMats = {};
   function tv(tex, w, h, x, y, z, ry, key) {
-    bx('office', 'p', x - 0.03 * Math.sin(ry), y, z - 0.03 * Math.cos(ry), 0.05, h + 0.1, w + 0.1, 0x12161a, 0);
+    /* layar menghadap sumbu z (ry = 0) memakai pelat tipis di z, bukan di x */
+    var faceZ = Math.abs(Math.cos(ry)) > 0.5;
+    bx('office', 'p', x - 0.03 * Math.sin(ry), y, z - 0.03 * Math.cos(ry),
+      faceZ ? w + 0.1 : 0.05, h + 0.1, faceZ ? 0.05 : w + 0.1, 0x12161a, 0);
     if (!tvMats[key]) tvMats[key] = new T.MeshBasicMaterial({ map: tex, toneMapped: false });
     var me = new T.Mesh(new T.PlaneGeometry(w, h), tvMats[key]);
     me.position.set(x + 0.0, y, z); me.rotation.y = ry; G.office.add(me);
+    return me;
   }
   tv(schedTex, 3.4, 1.7, -23.45, 1.9, -17.0, PI / 2, 'sched');
   tv(dashTex, 2.4, 1.35, -23.45, 5.3, -17.6, PI / 2, 'dash');
   tv(cctvTex, 1.6, 0.9, -23.45, 4.95, -15.2, PI / 2, 'cctv');
+  /* papan alur kerja di dinding utara inti kantor, menghadap lobi */
+  var wfMesh = tv(wfTex, 4.4, 2.3, -25.75, 2.05, -11.94, 0, 'wf');
+  bx('office', 'p', -25.75, 3.32, -11.9, 4.6, 0.16, 0.12, 0x12161a);
+  bx('office', 'p', -27.6, 0.72, -11.98, 0.16, 1.4, 0.1, 0x8a8f94);
+  bx('office', 'p', -23.9, 0.72, -11.98, 0.16, 1.4, 0.1, 0x8a8f94);
   bx('office', 'p', -20.8, 0.55, -3.1, 3.2, 1.1, 0.6, 0x5a6670); bx('office', 'p', -20.8, 1.12, -3.1, 3.3, 0.05, 0.7, 0xd8c7a6);
   sign('office', 'RESEPSIONIS', '', 1.8, 0.35, '#27475e', '#ffffff', -20.8, 0.55, -2.79, 0, false);
   bx('office', 'p', -17.4, 0.25, -3.2, 1.6, 0.5, 0.6, 0x3a5c7a); bx('office', 'p', -17.4, 0.55, -3.45, 1.6, 0.4, 0.15, 0x3a5c7a);
@@ -2148,8 +2343,35 @@ function buildWarehouse(T, opts) {
     [SPEND + 0.5, SPEND + 2.4, CHEND].forEach(function (zz) { [-0.4, 0.4].forEach(function (dx) { bx('conveyor', 'p', xl + dx, (0.84 - (zz - SPEND) * Math.tan(tilt)) / 2, zz, 0.06, 0.84 - (zz - SPEND) * Math.tan(tilt), 0.06, BLUE2); }); });
     bx('conveyor', 'p', xl, 0.8 - (CHEND + 0.1 - SPEND) * Math.tan(tilt) + 0.18, CHEND + 0.14, 0.9, 0.12, 0.06, YELLOW);
   });
-  bx('conveyor', 'p', -12, 1.1, TZ - 0.75, 0.12, 2.2, 0.12, BLUE2); bx('conveyor', 'p', -12, 1.1, TZ + 0.75, 0.12, 2.2, 0.12, BLUE2);
-  bx('conveyor', 'p', -12, 2.15, TZ, 0.14, 0.3, 1.7, 0x30343a); bx('conveyor', 'e', -12, 2.0, TZ, 0.05, 0.04, 1.5, 0xff3b30);
+  /* ---------- stasiun scan: titik keputusan jalur ----------
+     Paket datang dari ujung kiri sabuk induk, lewat tirai laser di sini, dan baru pada
+     saat itu jalurnya diputuskan. Barcode di layar dan log di panel Conveyor memakai
+     keputusan yang sama. */
+  var SX = -12;
+  bx('conveyor', 'p', SX, 1.35, TZ - 0.78, 0.16, 2.7, 0.16, 0x2f3438);
+  bx('conveyor', 'p', SX, 1.35, TZ + 0.78, 0.16, 2.7, 0.16, 0x2f3438);
+  bx('conveyor', 'p', SX, 2.75, TZ, 0.44, 0.2, 1.82, 0x2f3438);
+  bx('conveyor', 'p', SX, 2.5, TZ, 0.36, 0.32, 0.56, 0x14181c);
+  bx('conveyor', 'p', SX, 1.62, TZ + 0.92, 1.0, 0.66, 0.06, 0x12161a);
+  bx('conveyor', 'p', SX, 1.15, TZ + 0.78, 0.07, 0.95, 0.07, 0x2f3438);
+
+  /* material yang dianimasikan saat paket terpindai */
+  var laserM = new T.MeshBasicMaterial({ color: 0xff3b30, transparent: true, opacity: 0.22, side: T.DoubleSide, depthWrite: false, toneMapped: false });
+  var laser = new T.Mesh(new T.PlaneGeometry(1.5, 1.34), laserM);
+  laser.position.set(SX, 1.63, TZ); laser.rotation.y = PI / 2; G.conveyor.add(laser);
+  var lensM = new T.MeshBasicMaterial({ color: 0xff3b30, toneMapped: false });
+  var lens = new T.Mesh(new T.PlaneGeometry(0.3, 0.04), lensM);
+  lens.position.set(SX + 0.181, 2.36, TZ); lens.rotation.y = PI / 2; G.conveyor.add(lens);
+  var ledM = new T.MeshBasicMaterial({ color: 0x2a6b52, toneMapped: false });
+  var led = new T.Mesh(new T.SphereGeometry(0.075, 10, 8), ledM);
+  led.position.set(SX, 2.94, TZ + 0.78); G.conveyor.add(led);
+
+  /* layar operator: paket terakhir, tujuan, jalur */
+  var scanScreenM = new T.MeshBasicMaterial({ map: scanTex, toneMapped: false });
+  var scanScreen = new T.Mesh(new T.PlaneGeometry(0.9, 0.56), scanScreenM);
+  scanScreen.position.set(SX, 1.62, TZ + 0.955); G.conveyor.add(scanScreen);
+
+  if (!SIDE) sign('signs', 'STASIUN SCAN', 'Barcode · penentu jalur', 2.6, 0.46, '#1c3f7c', '#ffffff', SX, 3.12, TZ, 0, true);
   /* ---------- tata letak B: dermaga di sisi timur ---------- */
   var XT = 31.2, XB = 35.2, XC = 39.4, LZ = [2.5, 6.4, 10.3, 14.2, 18.1, 22.0, 25.9];
   function sideVehicles() {
@@ -2251,16 +2473,19 @@ function buildWarehouse(T, opts) {
   if (!SIDE) LANES.forEach(function (xl) { PATHS.push(mkPath([[TX0, TZ], [xl, TZ], [xl, SPEND], [xl, CHEND]], (xl - TX0) + (SPEND - TZ))); });
   else LZ.forEach(function (zl) { PATHS.push(mkPath([[TX0, TZ], [XT, TZ], [XT, zl], [XB, zl], [XC, zl]], (XT - TX0) + (zl - TZ) + (XB - XT))); });
   var NL = PATHS.length;
+  /* Jalur bersama sebelum stasiun scan: lane = -1 berarti paket belum punya tujuan. */
+  var TRUNK = mkPath([[TX0, TZ], [SX, TZ]], 0), SCAN_S = TRUNK.len;
+  function pathOf(p) { return p.lane < 0 ? TRUNK : PATHS[p.lane]; }
   for (var pi = 0; pi < NP; pi++) {
     var li = Math.floor(rnd() * NL);
-    pArr.push({ lane: li, s: rnd() * PATHS[li].len, w: rr(0.35, 0.65), h: rr(0.22, 0.42), d: rr(0.3, 0.5) });
+    pArr.push({ lane: li, s: rnd() * PATHS[li].len, dest: DEST[li % 7], w: rr(0.35, 0.65), h: rr(0.22, 0.42), d: rr(0.3, 0.5) });
     var hex = pick(PARCELS); tmpC.set(hex); tmpC.convertSRGBToLinear(); parcelMesh.setColorAt(pi, tmpC);
   }
   parcelMesh.frustumCulled = false; parcelMesh.castShadow = false; G.conveyor.add(parcelMesh);
   function updateParcels() {
     var q = 0;
     for (var i = 0; i < NP; i++) {
-      var p = pArr[i], P = PATHS[p.lane], s = p.s, x, y, z, yaw = 0, k;
+      var p = pArr[i], P = pathOf(p), s = p.s, x, y, z, yaw = 0, k;
       if (s < 0) { tmpS.set(0, 0, 0); tmpP.set(0, -5, 0); tmpM.compose(tmpP, qY0, tmpS); parcelMesh.setMatrixAt(i, tmpM); continue; }
       q++;
       for (k = 1; k < P.pts.length - 1 && s > P.cum[k]; k++) { }
@@ -2274,13 +2499,31 @@ function buildWarehouse(T, opts) {
     parcelMesh.instanceMatrix.needsUpdate = true;
   }
   updateParcels();
+  /* Keputusan jalur, diambil tepat saat paket melewati tirai laser. */
+  function scanParcel(p) {
+    var d = DEST[Math.floor(rnd() * DEST.length)];
+    p.lane = d.lane; p.dest = d;
+    SIM.scan++; SIM.laneScan[d.lane]++;
+    scanFlash = 1; scanSeen = SIM.min;
+    var code = 'PKG-' + (10000 + ((SIM.scan * 7919 + Math.floor(rnd() * 997)) % 89999));
+    var rec = { code: code, dest: d, lane: d.lane, at: SIM.min, no: SIM.scan };
+    SIM.scanLog.unshift(rec);
+    if (SIM.scanLog.length > 8) SIM.scanLog.pop();
+    return rec;
+  }
   function updateBelts(dt) {
     if (!run.on) return false;
-    var d = Math.min(dt, 0.05);
+    var d = Math.min(dt, 0.05), step = run.speed * d;
     belts.forEach(function (b) { b.t.offset.x += b.dir * run.speed / 0.5 * d; });
     for (var i = 0; i < NP; i++) {
-      var p = pArr[i]; p.s += run.speed * d;
-      if (p.s > PATHS[p.lane].len) { SIM.delivered++; SIM.laneDone[p.lane % 7]++; p.lane = Math.floor(rnd() * NL); p.s = -rnd() * 14; }
+      var p = pArr[i], from = p.s;
+      p.s += step;
+      if (p.lane < 0) {
+        if (from < SCAN_S && p.s >= SCAN_S) scanParcel(p);   /* tepi naik: beri tahu sekali saja */
+      } else if (p.s > PATHS[p.lane].len) {
+        SIM.delivered++; SIM.laneDone[p.lane % 7]++;
+        p.lane = -1; p.dest = null; p.s = -rnd() * 14;       /* kembali ke ujung sabuk, belum terpindai */
+      }
     }
     updateParcels();
     return true;
@@ -2565,6 +2808,14 @@ function buildWarehouse(T, opts) {
   function update(dt) {
     clk += dt; SIM.min += dt * 3;
     updateBelts(dt);
+    /* kilatan stasiun scan */
+    scanFlash = Math.max(0, scanFlash - dt * 2.4);
+    var hot = scanFlash > 0.02, ping = 0.5 + 0.5 * Math.sin(clk * 9);
+    laserM.opacity = (hot ? 0.34 + 0.5 * scanFlash : 0.16 + 0.06 * ping);
+    laserM.color.setHex(hot ? 0x3ee0a0 : 0xff3b30);
+    lensM.color.setHex(hot ? 0x6fffc4 : 0xff3b30);
+    ledM.color.setHex(hot ? 0x4dffa0 : (SIM.scan ? 0x1f6b4a : 0x244a3c));
+    led.scale.setScalar(1 + (hot ? 0.45 * scanFlash : 0.04 * ping));
     forklifts.forEach(function (f) {
       var ph = clk * 0.22 + f.ph;
       f.g.position.x = f.cx + f.amp * Math.sin(ph);
@@ -2596,6 +2847,14 @@ function buildWarehouse(T, opts) {
     setConveyor: function (on, speed) { run.on = on; if (speed) run.speed = speed; },
     isRunning: function () { return run.on; },
     parcelCount: NP,
+    workflow: wfMesh,
+    scanScreen: scanScreen,
+    scanState: function () {
+      return {
+        count: SIM.scan, log: SIM.scanLog.slice(0, 5), laneScan: SIM.laneScan.slice(), dests: DEST,
+        delivered: SIM.delivered, clock: SIM.min, queue: SIM.queue
+      };
+    },
     update: update, redraw: redraw, dispose: dispose
   };
 }
@@ -2613,10 +2872,12 @@ function buildWarehouse(T, opts) {
   var ZONES = {
     office: { n: 'Kantor manajemen', k: 'Ujung kiri', d: 'Gedung dua lantai 12 × 18 m di ujung kiri gudang. Lantai 1: resepsionis, ruang rapat kaca, arsip dan toilet. Lantai 2: tiga ruang manajer dan ruang admin dengan balkon menghadap lorong. Geser slider Kantor untuk melihat isinya.', c: { t: [-22, 3, -11], az: 0.95, pol: 1.15, r: 34 }, ghost: 'office' },
     office2: { n: 'Interior lantai 2', k: 'Kantor manajemen', d: 'Tiga ruang manajer berpartisi kaca dengan meja, kursi dan sofa, ditambah ruang admin dengan empat meja, pantri kopi dan lemari server. Setiap meja punya monitor yang hidup: dasbor gudang dan kamera CCTV.', c: { t: [-21, 4.6, -10], az: 1.1, pol: 1.2, r: 22 }, ghost: 'office' },
+    workflow: { n: 'Monitor alur kerja', k: 'Kantor manajemen', d: 'Layar besar di dinding lobi kantor menampilkan tujuh tahap alur kerja gudang: penerimaan, sortir, scan, conveyor, jalur, muat dan kirim, lengkap dengan angka yang ikut berjalan. Klik layarnya di tampilan 3D untuk membuka panel alur kerja, lalu pilih satu tahap untuk terbang ke zonanya.', c: { t: [-25.7, 1.9, -11.9], az: 0.05, pol: 1.42, r: 6.0 } },
     board: { n: 'Papan jadwal kurir', k: 'Kantor manajemen', d: 'Layar besar di lobi lantai 1 menampilkan jadwal keberangkatan kurir: nama, jalur, armada, jam berangkat dan status (berangkat, muat, siap, menunggu). Jamnya berjalan dan baris naik tiap 10 menit simulasi. Di lantai 2 ada layar dasbor paket dan CCTV.', c: { t: [-23.4, 1.9, -17], az: 1.45, pol: 1.45, r: 9 } },
     racks: { n: 'Rak palet tinggi', k: 'Penyimpanan', d: 'Dua baris rak palet biru dengan balok oranye, 15 bay per baris dan 5 level setinggi 8,9 m. Di belakangnya ada latar kardus kuning yang diambil dari foto acuan. Lorong rak cukup lebar untuk forklift.', c: { t: [6, 4, -17.7], az: 0.15, pol: 1.25, r: 34 }, ghost: 'roof' },
     etalase: { n: 'Etalase paket', k: 'Rak picking', d: 'Tiga baris rak ringan abu-abu dengan tiang biru dan empat level, untuk paket kecil yang diambil harian.', c: { t: [-4, 1.4, -10.4], az: 0.1, pol: 1.15, r: 20 } },
     tables: { n: 'Meja sortir', k: 'Zona sortir', d: 'Dua baris meja baja abu-abu dengan rak atas, tempat petugas memilah paket menurut tujuan sebelum naik ke conveyor.', c: { t: [17, 1, -9.3], az: 0.1, pol: 1.15, r: 20 } },
+    scanner: { n: 'Stasiun scan barcode', k: 'Konveyor', d: 'Gerbang pemindai di atas sabuk induk, sebelum cabang pertama. Setiap paket melewati tirai laser di titik ini dan baru di situ jalurnya diputuskan: tujuan, nomor jalur dan armadanya muncul di layar operator dan tercatat di tab Conveyor. Klik tab Conveyor untuk melihat log pemindaian terakhir.', c: { t: [-12, 1.5, -3.2], az: 0.55, pol: 1.2, r: 9 } },
     conveyor: { n: 'Conveyor utama', k: 'Konveyor', d: 'Sabuk induk membujur dari kiri ke kanan dengan pemindai barcode di dekat awal, lalu bercabang ke tujuh jalur menuju dermaga. Nyalakan atau hentikan di tab Conveyor.', c: { t: [6, 0.9, -3.2], az: 0.2, pol: 1.1, r: 26 } },
     lanes: { n: 'Jalur dispatch 1 sampai 7', k: 'Konveyor', d: 'Tujuh sabuk cabang lalu roller gravitasi yang menurun ke tepi dermaga. Jalur 1 sampai 3 untuk kurir motor, jalur 4 sampai 7 untuk mobil dan van. Pada tata letak B, jalur ini berada di sisi timur.', c: { t: [8, 0.8, 8.5], az: 0.15, pol: 1.0, r: 24 } },
     dockMoto: { n: 'Dermaga kurir motor', k: 'Ruang terbuka', d: 'Baris parkir motor kurir di ujung bawah dengan zona biru di lantai. Kurir mengambil paket di ujung jalur motor, lalu keluar lewat gerbang.', c: { t: [-4.5, 0.8, 18], az: 0.35, pol: 1.05, r: 20 } },
@@ -2631,9 +2892,9 @@ function buildWarehouse(T, opts) {
     assembly: { n: 'Titik kumpul', k: 'Keselamatan', d: 'Tiga titik kumpul di halaman dengan papan hijau TITIK KUMPUL dan area bertanda di aspal.', c: { t: [-32, 1, 26], az: 0.6, pol: 1.1, r: 22 }, safety: ['sfAssy', 'sfRoute'] }
   };
   var ORDER = [
-    ['Ujung kiri', ['office', 'office2', 'board']],
+    ['Ujung kiri', ['office', 'office2', 'board', 'workflow']],
     ['Penyimpanan dan picking', ['racks', 'etalase', 'tables']],
-    ['Konveyor', ['conveyor', 'lanes']],
+    ['Konveyor', ['scanner', 'conveyor', 'lanes']],
     ['Ujung bawah (shipment)', ['dockMoto', 'dockCar', 'yard']],
     ['Keselamatan', ['evac', 'apar', 'sprinkler', 'forklift', 'assembly']],
     ['Struktur', ['roof']],
@@ -2642,9 +2903,11 @@ function buildWarehouse(T, opts) {
   var CALLOUTS = [
     ['office', 'Kantor manajemen', [-22, 7.6, -11]],
     ['board', 'Papan jadwal kurir', [-23.4, 3.2, -17]],
+    ['workflow', 'Alur kerja', [-25.7, 3.45, -11.9]],
     ['racks', 'Rak palet', [6, 9.4, -17.7]],
     ['etalase', 'Etalase paket', [-4, 2.5, -10.4]],
     ['tables', 'Meja sortir', [17, 2.0, -9.3]],
+    ['scanner', 'Stasiun scan', [-12, 3.15, -3.2]],
     ['conveyor', 'Conveyor utama', [6, 1.5, -3.2]],
     ['lanes', 'Jalur dispatch', [8, 1.5, 9.5]],
     ['dockMoto', 'Kurir motor', [-5, 1.8, 18]],
@@ -2885,7 +3148,12 @@ function buildWarehouse(T, opts) {
     setLevel: function (n) { qLevel = Math.max(0, Math.min(QUALITY.length - 1, n | 0)); applyQuality(); },
     state: function () { return S; },
     worlds: function () { return worlds.length; },
-    compare: function (on) { setCompare(!!on); }
+    compare: function (on) { setCompare(!!on); },
+    scan: function () { return A.wh.scanState(); },
+    workflowMesh: function () { return A.wh.workflow; },
+    openFlow: openFlow,
+    closeFlow: closeFlow,
+    flowOpen: function () { return flowOpen; }
   };
   function applyCamera() {
     var sp = Math.sin(view.pol), cp = Math.cos(view.pol);
@@ -2931,7 +3199,10 @@ function buildWarehouse(T, opts) {
   });
   canvas.addEventListener('pointermove', function (e) {
     var p = ptrs.get(e.pointerId);
-    if (!p) { if (e.pointerType !== 'touch') canvas.style.cursor = hitGenset(e.clientX, e.clientY) ? 'pointer' : 'grab'; return; }
+    if (!p) {
+      if (e.pointerType !== 'touch') canvas.style.cursor = (hitWorkflow(e.clientX, e.clientY) || hitGenset(e.clientX, e.clientY)) ? 'pointer' : 'grab';
+      return;
+    }
     var dx = e.clientX - p.x, dy = e.clientY - p.y;
     if (ptrs.size === 1) {
       if (downInfo) downInfo.moved += Math.abs(dx) + Math.abs(dy);
@@ -2961,21 +3232,102 @@ function buildWarehouse(T, opts) {
     if (h) { e.preventDefault(); tween = null; clampView(); kick(); }
   });
 
+  /* ---------- alur kerja gudang ---------- */
+  var FLOW = [
+    { n: '01', t: 'Penerimaan', d: 'Paket turun di dermaga dan dicatat petugas.', z: 'yard' },
+    { n: '02', t: 'Sortir', d: 'Paket dipilah menurut tujuan di meja sortir.', z: 'tables' },
+    { n: '03', t: 'Scan barcode', d: 'Tirai laser membaca label; jalur 1-7 ditentukan di sini.', z: 'scanner' },
+    { n: '04', t: 'Conveyor utama', d: 'Sabuk induk membawa paket ke titik cabang jalurnya.', z: 'conveyor' },
+    { n: '05', t: 'Jalur dispatch 1-7', d: 'J1-J3 untuk motor, J4-J7 untuk van dan mobil.', z: 'lanes' },
+    { n: '06', t: 'Muat', d: 'Kurir memuat paket di dermaga motor atau mobil.', z: 'dockMoto' },
+    { n: '07', t: 'Kirim', d: 'Armada keluar gerbang menuju kotanya masing-masing.', z: 'dockCar' }
+  ];
+  var flowEl = $('#flow'), flowListEl = $('#flowList'), flowFootEl = $('#flowFoot'), flowOpen = false;
+  function syncFlow() {
+    var st = A.wh.scanState();
+    flowFootEl.textContent = 'Terpindai ' + st.count + ' paket · terkirim ' + st.delivered +
+      ' paket · jam ' + hhmmClock(st.clock) + ' · jalur dengan paket terbanyak J' + busiestLane(st.laneScan);
+  }
+  function hhmmClock(m) {
+    m = ((Math.round(m) % 1440) + 1440) % 1440;
+    var hh = Math.floor(m / 60), mm = m % 60;
+    return (hh < 10 ? '0' : '') + hh + ':' + (mm < 10 ? '0' : '') + mm;
+  }
+  function busiestLane(a) { var k = 0; a.forEach(function (v, i) { if (v > a[k]) k = i; }); return k + 1; }
+  function openFlow() {
+    flowOpen = true; flowEl.hidden = false;
+    flowListEl.innerHTML = FLOW.map(function (f) {
+      return '<li><button class="flow-step" type="button" data-z="' + f.z + '">' +
+        '<span class="n">' + f.n + '</span>' +
+        '<span class="row-txt"><span class="t">' + f.t + '</span><span class="d">' + f.d + '</span></span>' +
+        '<span class="go">Buka</span></button></li>';
+    }).join('');
+    Array.prototype.forEach.call(flowListEl.querySelectorAll('.flow-step'), function (b) {
+      b.addEventListener('click', function () { closeFlow(); focusZone(b.dataset.z); });
+    });
+    syncFlow();
+    $('#flowClose').focus();
+  }
+  function closeFlow() { flowOpen = false; flowEl.hidden = true; }
+  $('#flowClose').addEventListener('click', closeFlow);
+  flowEl.addEventListener('click', function (e) { if (e.target === flowEl) closeFlow(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && flowOpen) closeFlow(); });
+  $('#infoFlow').addEventListener('click', openFlow);
+
+  /* ---------- stasiun scan: log pemindaian di tab Conveyor ---------- */
+  var scanListEl = $('#scanLog'), scanPillEl = $('#scanPill'), scanCountEl = $('#scanCount'), laneBarsEl = $('#laneBars');
+  var scanSeenCount = -1, scanPillAt = 0;
+  function paintScan() {
+    var st = A.wh.scanState();
+    scanCountEl.textContent = st.count;
+    scanListEl.innerHTML = st.log.length ? st.log.map(function (r) {
+      return '<li><span class="row-txt"><span class="row-name">' + r.code + '</span><span class="row-sub">' +
+        r.dest.name + ' · ' + r.dest.arm + '</span></span><span class="num">J' + (r.lane + 1) + '</span></li>';
+    }).join('') : '<li><span class="row-name">Belum ada paket terpindai</span><span class="num">—</span></li>';
+    var mx = 1; st.laneScan.forEach(function (v) { mx = Math.max(mx, v); });
+    laneBarsEl.innerHTML = st.laneScan.map(function (v, i) {
+      return '<div><i style="height:' + Math.max(2, Math.round(38 * v / mx)) + 'px"></i><b>J' + (i + 1) + '</b></div>';
+    }).join('');
+  }
+  function tickScan(now) {
+    var st = A.wh.scanState();
+    if (st.count !== scanSeenCount) { scanSeenCount = st.count; paintScan(); scanPillAt = now; }
+    var hot = now - scanPillAt < 900 && st.count > 0;
+    if (hot !== scanPillEl.classList.contains('on')) scanPillEl.classList.toggle('on', hot);
+    if (scanPillEl.textContent !== (hot ? 'Scan OK' : 'Menunggu paket')) scanPillEl.textContent = hot ? 'Scan OK' : 'Menunggu paket';
+  }
+  paintScan();
+
   /* ---------- memilih pintu genset ---------- */
   var ray = new T.Raycaster(), ndc = new T.Vector2();
   function fovFor(aspect) { return aspect < 0.9 ? 52 : 34; }
   function setAspect(a) { camera.aspect = a; camera.fov = fovFor(a); camera.updateProjectionMatrix(); }
   function doorOf(o) { var c = o; while (c) { if (c.userData && c.userData.door) return c.userData.door; c = c.parent; } return null; }
-  function hitGenset(cx, cy) {
+  /* Mengarahkan raycast ke separuh layar yang benar saat mode bandingkan. */
+  function aimRay(cx, cy) {
     var r = canvas.getBoundingClientRect(), W = A, lx = cx - r.left, w = r.width;
     if (S.cmp && B) { var hw = w / 2; if (lx > hw) { W = B; lx -= hw; } w = hw; setAspect(w / r.height); } else setAspect(w / r.height);
     camera.updateMatrixWorld();
     ndc.set((lx / w) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
     ray.setFromCamera(ndc, camera);
+    return W;
+  }
+  function hitGenset(cx, cy) {
+    var W = aimRay(cx, cy);
     var h = ray.intersectObjects(W.model.pickables().concat(W.shelter.pickables()), false);
     return h.length ? doorOf(h[0].object) : null;
   }
-  function pickAt(cx, cy) { var d = hitGenset(cx, cy); if (d) { toggleAny(d); syncDoors(); touch(80); } }
+  /* Monitor alur kerja di kantor: layar besar di dinding lobi. */
+  function hitWorkflow(cx, cy) {
+    var W = aimRay(cx, cy);
+    if (!W.wh.workflow || !W.wh.workflow.visible) return false;
+    return ray.intersectObject(W.wh.workflow, false).length > 0;
+  }
+  function pickAt(cx, cy) {
+    if (hitWorkflow(cx, cy)) { openFlow(); return; }
+    var d = hitGenset(cx, cy);
+    if (d) { toggleAny(d); syncDoors(); touch(80); }
+  }
   function toggleAny(k, force) {
     eachW(function (W) { if (W.model.doors[k]) W.model.toggleDoor(k, force); else if (W.shelter.doors[k]) W.shelter.toggleDoor(k, force); });
     doorAnimUntil = performance.now() + 2600;   /* jendela animasi daun pintu */
@@ -2988,6 +3340,9 @@ function buildWarehouse(T, opts) {
     sel = id;
     document.querySelectorAll('.part-row').forEach(function (b) { b.setAttribute('aria-pressed', b.dataset.id === id ? 'true' : 'false'); });
     if (!id) { info.hidden = true; return; }
+    var isFlow = id === 'workflow';
+    $('#infoFlow').hidden = !isFlow;
+    $('#infoFocus').className = isFlow ? 'btn' : 'btn pri';
     var Z = ZONES[id];
     $('#infoKind').textContent = Z.k; $('#infoName').textContent = Z.n; $('#infoText').textContent = Z.d;
     info.hidden = false;
@@ -3215,7 +3570,7 @@ function buildWarehouse(T, opts) {
     return false;
   }
 
-  var last = performance.now(), frame = 0, lastDrawAt = last, idle = true, fresh = true;
+  var last = performance.now(), frame = 0, lastDrawAt = last, idle = true, fresh = true, uiTickAt = 0;
   function loop(now) {
     requestAnimationFrame(loop);
     if (document.hidden) { idle = true; return; }
@@ -3242,6 +3597,7 @@ function buildWarehouse(T, opts) {
     applyCamera(); camera.updateMatrixWorld();
     render();
     placeCallouts();
+    if (now - uiTickAt > 450) { uiTickAt = now; tickScan(now); if (flowOpen) syncFlow(); }
   }
   openTab('zones'); syncDoors();
   pct($('#opRoof'), $('#opRoofVal'), S.roof); pct($('#opWall'), $('#opWallVal'), 1); pct($('#opOff'), $('#opOffVal'), 1);
