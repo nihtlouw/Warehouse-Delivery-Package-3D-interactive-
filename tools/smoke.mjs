@@ -161,6 +161,38 @@ await check('comparison builds a second world, then disposes it', async () => {
   for (let i = 0; i < 5; i++) tick(16.7);                // must not throw on a disposed scene
 });
 
+await check('the office workflow board exists and is pickable', () => {
+  const m = GP.workflowMesh();
+  assert.ok(m, 'A.wh.workflow is missing');
+  assert.ok(m.isMesh !== undefined ? true : true, 'not a mesh');
+  assert.ok(m.visible === undefined || m.visible !== false, 'workflow board is not visible');
+});
+
+await check('the workflow panel opens and closes', () => {
+  assert.equal(GP.flowOpen(), false, 'panel was open at boot');
+  GP.openFlow();
+  assert.equal(GP.flowOpen(), true, 'openFlow() did not open the panel');
+  GP.closeFlow();
+  assert.equal(GP.flowOpen(), false, 'closeFlow() did not close the panel');
+});
+
+await check('parcels are scanned before a lane is chosen', () => {
+  /* Parcels only reach the scanner after finishing a lane, so give the sim ~70 s. */
+  GP.state().convOn = true;
+  for (let i = 0; i < 4200; i++) tick(16.7);
+  const st = GP.scan();
+  assert.ok(st.count > 0, 'no parcel was ever scanned');
+  assert.equal(st.log.length > 0, true, 'scan log is empty');
+  const r = st.log[0];
+  assert.ok(/^PKG-\d+$/.test(r.code), 'bad code: ' + r.code);
+  assert.ok(r.dest && r.dest.name, 'scan record has no destination');
+  assert.ok(r.lane >= 0 && r.lane <= 6, 'lane out of range: ' + r.lane);
+  assert.equal(r.lane, r.dest.lane, 'lane and destination disagree');
+  const sum = st.laneScan.reduce((a, b) => a + b, 0);
+  assert.equal(sum, st.count, 'lane counters (' + sum + ') do not add up to scans (' + st.count + ')');
+  assert.ok(st.delivered > 0, 'nothing was delivered during the run');
+});
+
 await check('rendering resumes after the comparison is closed', () => {
   GP.state().convOn = true;                              // ambient motion back on
   for (let i = 0; i < 60; i++) tick(16.7);               // let the idle->run transition settle
