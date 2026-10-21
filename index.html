@@ -2678,9 +2678,23 @@ function buildWarehouse(T, opts) {
   renderer.toneMappingExposure = 1.0;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = T.PCFSoftShadowMap;
+  renderer.shadowMap.autoUpdate = false;   // peta bayangan hanya dihitung ulang saat isi scene bergerak
   renderer.setClearColor(0x000000, 0);
   var camera = new T.PerspectiveCamera(34, 1, 0.3, 500);
   var small = window.innerWidth < 860;
+
+  /* ---------- kualitas adaptif ----------
+     Tiga tingkat. Turun satu tingkat kalau frame time tembus ~34 ms (di bawah 30 fps).
+     DPR, ukuran peta bayangan dan jumlah lampu titik ikut turun bersama. */
+  var QUALITY = [
+    { name: 'tinggi', dpr: 2, shadow: 4096, lights: 9 },
+    { name: 'sedang', dpr: 1.5, shadow: 2048, lights: 6 },
+    { name: 'rendah', dpr: 1, shadow: 1024, lights: 3 }
+  ];
+  var qLevel = 0;
+  function Q() { return QUALITY[qLevel]; }
+  function shadowRes() { return Math.min(small ? 2048 : 4096, Q().shadow); }
+  function ambientMs() { return 1000 / (qLevel >= 2 ? 24 : 30); }
 
   var envTex = (function () {
     var pm = new T.PMREMGenerator(renderer), es = new T.Scene();
@@ -2738,7 +2752,7 @@ function buildWarehouse(T, opts) {
     var key = new T.DirectionalLight(0xfff4e6, 1.45);
     key.position.set(34, 55, 42); key.target.position.set(2, 0, 0); scene.add(key.target);
     key.castShadow = true;
-    var ms = (small || dock === 'side') ? 2048 : 4096; key.shadow.mapSize.set(ms, ms);
+    var ms = shadowRes(); key.shadow.mapSize.set(ms, ms);
     var sc = key.shadow.camera; sc.left = -68; sc.right = 68; sc.top = 56; sc.bottom = -56; sc.near = 10; sc.far = 190;
     key.shadow.bias = -0.0004; key.shadow.normalBias = 0.05;
     scene.add(key); W.key = key;
@@ -2761,10 +2775,45 @@ function buildWarehouse(T, opts) {
   var A = makeWorld('bawah'), B = null, worlds = [A];
   function eachW(f) { worlds.forEach(f); }
 
+  /* Lepas semua sumber daya GPU milik satu dunia (geometri, material, tekstur, peta bayangan).
+     envTex dipakai bersama jadi tidak boleh dibuang. */
+  function disposeWorld(W) {
+    var geos = {}, mats = {};
+    W.scene.traverse(function (o) {
+      if (o.geometry && !geos[o.geometry.uuid]) { geos[o.geometry.uuid] = 1; o.geometry.dispose(); }
+      var ms = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : null;
+      if (ms) ms.forEach(function (m) {
+        if (!m || mats[m.uuid]) return;
+        mats[m.uuid] = 1;
+        for (var k in m) { var v = m[k]; if (v && v.isTexture && v !== envTex) v.dispose(); }
+        m.dispose();
+      });
+      if (o.isLight && o.shadow && o.shadow.map) { o.shadow.map.dispose(); o.shadow.map = null; }
+    });
+    if (W.wh && W.wh.dispose) W.wh.dispose();
+    if (W.shelter && W.shelter.dispose) W.shelter.dispose();
+    W.scene.environment = null;
+    W.scene.clear();
+  }
+  function dropCompare() {
+    if (!B) return;
+    var W = B; B = null;
+    var i = worlds.indexOf(W); if (i >= 0) worlds.splice(i, 1);
+    disposeWorld(W);
+  }
+
   /* ---------- keadaan UI ---------- */
   var S = { roof: 0.2, wall: 1, off: 1, can: 1, shRoof: 1, shWall: 1, lights: true, run: false, convOn: true, speed: 1.1, weather: 'cerah', rain: 0.7, layers: {}, cmp: false };
   var calloutsOn = window.innerWidth > 700, coWrap = $('#calloutLayer'), info = $('#info');
 
+  function applyWeatherLights(W) {
+    var P = WEATHER[S.weather], lim = Q().lights;
+    W.pls.forEach(function (p, i) {
+      var on = P.lamps > 0.01 && i < lim;
+      p.l.intensity = on ? P.lamps * p.k : 0;
+      p.l.visible = on;
+    });
+  }
   function applyWeather(W) {
     var P = WEATHER[S.weather], sc = W.scene;
     W.key.intensity = P.key; W.key.color.setHex(P.keyCol);
@@ -2775,7 +2824,7 @@ function buildWarehouse(T, opts) {
     if (fogWas !== !!sc.fog) sc.traverse(function (o) { if (o.material) { (Array.isArray(o.material) ? o.material : [o.material]).forEach(function (m) { m.needsUpdate = true; }); } });
     sc.traverse(function (o) { if (o.material && !o.isLine) { (Array.isArray(o.material) ? o.material : [o.material]).forEach(function (m) { if (m.isMeshStandardMaterial) m.envMapIntensity = P.env; }); } });
     W.wh.setWet(P.wet); W.wh.setNight(P.night);
-    W.pls.forEach(function (p) { p.l.intensity = P.lamps * p.k; p.l.visible = P.lamps > 0.01; });
+    applyWeatherLights(W);
     W.rain.obj.visible = P.rain > 0; W.rain.setIntensity(S.rain);
   }
   function applyStage() {
@@ -2796,8 +2845,48 @@ function buildWarehouse(T, opts) {
 
   /* ---------- kamera ---------- */
   var view = { az: 0.62, pol: 1.0, r: 88, t: new T.Vector3(2, 1, 2) };
-  var tween = null, dirty = 60;
+  /* ---------- render sesuai permintaan ----------
+     dirty  = jumlah frame yang masih harus digambar (kamera atau UI berubah).
+     touch  = isi scene berubah, jadi peta bayangan juga harus dihitung ulang.
+     Loop berhenti sama sekali kalau tidak ada yang bergerak. */
+  var tween = null, dirty = 60, shadowDirty = true, shadowAnim = false, doorAnimUntil = 0;
   function kick(n) { dirty = Math.max(dirty, n || 30); }
+  function touch(n) { shadowDirty = true; kick(n); }
+
+  var perf = { acc: 0, n: 0, warm: 45 };
+  function sampleFrame(ms) {
+    if (perf.warm > 0) { perf.warm--; return; }
+    perf.acc += ms; perf.n++;
+    if (perf.n < 45) return;
+    var avg = perf.acc / perf.n; perf.acc = 0; perf.n = 0;
+    if (avg > 34 && qLevel < QUALITY.length - 1) { qLevel++; applyQuality(); perf.warm = 30; }
+  }
+  function applyShadowRes() {
+    var res = shadowRes();
+    [A, B].forEach(function (W) {
+      if (!W) return;
+      var ms = W.key.shadow.mapSize;
+      if (ms.x === res) return;
+      ms.set(res, res);
+      if (W.key.shadow.map) { W.key.shadow.map.dispose(); W.key.shadow.map = null; }
+      shadowDirty = true;
+    });
+  }
+  function applyQuality() {
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, Q().dpr));
+    applyShadowRes();
+    eachW(applyWeatherLights);
+    kick(2);
+  }
+  window.GP3D = {
+    quality: function () { return Q().name; },
+    level: function () { return qLevel; },
+    frames: function () { return frame; },
+    setLevel: function (n) { qLevel = Math.max(0, Math.min(QUALITY.length - 1, n | 0)); applyQuality(); },
+    state: function () { return S; },
+    worlds: function () { return worlds.length; },
+    compare: function (on) { setCompare(!!on); }
+  };
   function applyCamera() {
     var sp = Math.sin(view.pol), cp = Math.cos(view.pol);
     camera.position.set(view.t.x + view.r * sp * Math.sin(view.az), view.t.y + view.r * cp, view.t.z + view.r * sp * Math.cos(view.az));
@@ -2818,7 +2907,7 @@ function buildWarehouse(T, opts) {
     view.pol = tween.from.pol + (tween.to.pol - tween.from.pol) * e;
     view.r = tween.from.r + (tween.to.r - tween.from.r) * e;
     view.t.lerpVectors(tween.from.t, tween.to.t, e);
-    if (k >= 1) tween = null;
+    if (k >= 1) { tween = null; shadowDirty = true; }   /* bayangan disusul setelah kamera berhenti */
   }
   var ptrs = new Map(), downInfo = null, lastPinch = 0;
   function clampView() {
@@ -2859,7 +2948,7 @@ function buildWarehouse(T, opts) {
     if (!ptrs.delete(e.pointerId)) return;
     if (ptrs.size === 0 && downInfo && downInfo.moved < 6 && performance.now() - downInfo.t < 500 && e.type === 'pointerup') pickAt(e.clientX, e.clientY);
     if (ptrs.size < 2) lastPinch = 0;
-    if (ptrs.size === 0) downInfo = null;
+    if (ptrs.size === 0) { downInfo = null; shadowDirty = true; kick(2); }
   }
   canvas.addEventListener('pointerup', endPtr);
   canvas.addEventListener('pointercancel', endPtr);
@@ -2886,9 +2975,10 @@ function buildWarehouse(T, opts) {
     var h = ray.intersectObjects(W.model.pickables().concat(W.shelter.pickables()), false);
     return h.length ? doorOf(h[0].object) : null;
   }
-  function pickAt(cx, cy) { var d = hitGenset(cx, cy); if (d) { toggleAny(d); syncDoors(); kick(80); } }
+  function pickAt(cx, cy) { var d = hitGenset(cx, cy); if (d) { toggleAny(d); syncDoors(); touch(80); } }
   function toggleAny(k, force) {
     eachW(function (W) { if (W.model.doors[k]) W.model.toggleDoor(k, force); else if (W.shelter.doors[k]) W.shelter.toggleDoor(k, force); });
+    doorAnimUntil = performance.now() + 2600;   /* jendela animasi daun pintu */
   }
   function getDoor(k) { return A.model.doors[k] || A.shelter.doors[k]; }
 
@@ -2944,9 +3034,9 @@ function buildWarehouse(T, opts) {
   });
 
   function pct(el, out, v) { el.value = Math.round(v * 100); out.textContent = Math.round(v * 100) + '%'; }
-  function setRoof(v) { S.roof = v; eachW(function (W) { W.wh.setRoof(v); }); pct($('#opRoof'), $('#opRoofVal'), v); sync(); kick(40); }
-  function setWall(v) { S.wall = v; eachW(function (W) { W.wh.setWalls(v); }); pct($('#opWall'), $('#opWallVal'), v); sync(); kick(40); }
-  function setOff(v) { S.off = v; eachW(function (W) { W.wh.setOffice(v); }); pct($('#opOff'), $('#opOffVal'), v); sync(); kick(40); }
+  function setRoof(v) { S.roof = v; eachW(function (W) { W.wh.setRoof(v); }); pct($('#opRoof'), $('#opRoofVal'), v); sync(); touch(40); }
+  function setWall(v) { S.wall = v; eachW(function (W) { W.wh.setWalls(v); }); pct($('#opWall'), $('#opWallVal'), v); sync(); touch(40); }
+  function setOff(v) { S.off = v; eachW(function (W) { W.wh.setOffice(v); }); pct($('#opOff'), $('#opOffVal'), v); sync(); touch(40); }
   function sync() {
     document.querySelectorAll('.tpreset').forEach(function (b) {
       var v = parseFloat(b.dataset.v);
@@ -2965,7 +3055,7 @@ function buildWarehouse(T, opts) {
   function setLayer(k, on) {
     S.layers[k] = on; eachW(function (W) { W.wh.setGroup(k, on); });
     var el = $('#layer_' + k); if (el) el.checked = on;
-    kick();
+    touch();
   }
   function addRows(list, ul, withSub) {
     list.forEach(function (l) {
@@ -2986,7 +3076,7 @@ function buildWarehouse(T, opts) {
   function setWeather(k) {
     S.weather = k;
     document.querySelectorAll('.wbtn').forEach(function (b) { b.setAttribute('aria-pressed', b.dataset.w === k ? 'true' : 'false'); });
-    eachW(applyWeather); applyStage(); kick(60);
+    eachW(applyWeather); applyStage(); touch(60);
   }
   document.querySelectorAll('.wbtn').forEach(function (b) { b.addEventListener('click', function () { setWeather(b.dataset.w); }); });
   $('#rainAmt').addEventListener('input', function (e) { S.rain = e.target.value / 100; $('#rainAmtVal').textContent = e.target.value + '%'; eachW(function (W) { W.rain.setIntensity(S.rain); }); kick(); });
@@ -3011,16 +3101,16 @@ function buildWarehouse(T, opts) {
     var li = document.createElement('li');
     li.innerHTML = '<div class="row-txt"><span class="row-name">' + d[1] + '</span><span class="row-sub">' + d[2] + '</span></div><label class="sw"><input type="checkbox" id="door_' + d[0] + '" aria-label="' + d[1] + '"><span class="sw-ui"></span></label>';
     doorList.appendChild(li);
-    $('#door_' + d[0]).addEventListener('change', function (e) { toggleAny(d[0], e.target.checked); kick(80); });
+    $('#door_' + d[0]).addEventListener('change', function (e) { toggleAny(d[0], e.target.checked); touch(80); });
   });
   function syncDoors() { DOORS.forEach(function (d) { var dr = getDoor(d[0]); $('#door_' + d[0]).checked = !!(dr && dr.target); }); }
-  $('#openAll').addEventListener('click', function () { DOORS.forEach(function (d) { toggleAny(d[0], true); }); syncDoors(); kick(80); });
-  $('#closeAll').addEventListener('click', function () { DOORS.forEach(function (d) { toggleAny(d[0], false); }); syncDoors(); kick(80); });
-  $('#run').addEventListener('change', function (e) { S.run = e.target.checked; eachW(function (W) { W.model.setRun(S.run); }); kick(60); });
-  $('#opCan').addEventListener('input', function (e) { S.can = e.target.value / 100; eachW(function (W) { W.model.setShell(S.can); }); $('#opCanVal').textContent = e.target.value + '%'; kick(40); });
-  $('#opShRoof').addEventListener('input', function (e) { S.shRoof = e.target.value / 100; eachW(function (W) { W.shelter.setRoof(S.shRoof); }); $('#opShRoofVal').textContent = e.target.value + '%'; kick(40); });
-  $('#opShWall').addEventListener('input', function (e) { S.shWall = e.target.value / 100; eachW(function (W) { W.shelter.setWalls(S.shWall); }); $('#opShWallVal').textContent = e.target.value + '%'; kick(40); });
-  $('#shLights').addEventListener('change', function (e) { S.lights = e.target.checked; eachW(function (W) { W.shelter.setLights(S.lights); }); kick(); });
+  $('#openAll').addEventListener('click', function () { DOORS.forEach(function (d) { toggleAny(d[0], true); }); syncDoors(); touch(80); });
+  $('#closeAll').addEventListener('click', function () { DOORS.forEach(function (d) { toggleAny(d[0], false); }); syncDoors(); touch(80); });
+  $('#run').addEventListener('change', function (e) { S.run = e.target.checked; eachW(function (W) { W.model.setRun(S.run); }); touch(60); });
+  $('#opCan').addEventListener('input', function (e) { S.can = e.target.value / 100; eachW(function (W) { W.model.setShell(S.can); }); $('#opCanVal').textContent = e.target.value + '%'; touch(40); });
+  $('#opShRoof').addEventListener('input', function (e) { S.shRoof = e.target.value / 100; eachW(function (W) { W.shelter.setRoof(S.shRoof); }); $('#opShRoofVal').textContent = e.target.value + '%'; touch(40); });
+  $('#opShWall').addEventListener('input', function (e) { S.shWall = e.target.value / 100; eachW(function (W) { W.shelter.setWalls(S.shWall); }); $('#opShWallVal').textContent = e.target.value + '%'; touch(40); });
+  $('#shLights').addEventListener('change', function (e) { S.lights = e.target.checked; eachW(function (W) { W.shelter.setLights(S.lights); }); touch(); });
   $('#gensetGo').addEventListener('click', function () { focusZone('genset'); });
 
   /* tampilan kamera */
@@ -3050,6 +3140,7 @@ function buildWarehouse(T, opts) {
     cmpBtn.textContent = on ? 'Tutup perbandingan' : 'Bandingkan A | B';
     cmpBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
     cmpLabels.hidden = !on;
+    if (!on) dropCompare();               // dunia B dibuang, tidak lagi dianimasikan di latar
     if (on) { select(null); goTo(VIEWS.iso, 0.8); }
     resize(); kick(80);
   }
@@ -3081,8 +3172,10 @@ function buildWarehouse(T, opts) {
   function resize() {
     var w = stage.clientWidth, h = stage.clientHeight;
     if (!w || !h) return;
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    small = w < 860;                      /* ambang ponsel dihitung ulang, bukan sekali saat muat */
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, Q().dpr));
     renderer.setSize(w, h, false);
+    applyShadowRes();
     kick();
   }
   if (window.ResizeObserver) new ResizeObserver(resize).observe(stage); else window.addEventListener('resize', resize);
@@ -3090,26 +3183,58 @@ function buildWarehouse(T, opts) {
 
   function render() {
     var w = canvas.clientWidth, h = canvas.clientHeight;
+    /* Peta bayangan hanya dihitung ulang kalau isi scene berubah. Saat menggeser kamera
+       atau selama tween, bayangan dibiarkan apa adanya — ini bagian paling mahal. */
+    var needSh = shadowDirty || (shadowAnim && ptrs.size === 0 && !tween);
+    shadowDirty = false;
     if (!S.cmp || !B) {
       renderer.setScissorTest(false); renderer.setViewport(0, 0, w, h);
-      setAspect(w / h); camera.updateMatrixWorld(); renderer.render(A.scene, camera);
+      setAspect(w / h); camera.updateMatrixWorld();
+      renderer.shadowMap.needsUpdate = needSh;
+      renderer.render(A.scene, camera);
     } else {
       var hw = Math.floor(w / 2);
       renderer.setScissorTest(true);
       [A, B].forEach(function (W, i) {
         renderer.setViewport(i * hw, 0, hw, h); renderer.setScissor(i * hw, 0, hw, h);
-        setAspect(hw / h); camera.updateMatrixWorld(); renderer.render(W.scene, camera);
+        setAspect(hw / h); camera.updateMatrixWorld();
+        renderer.shadowMap.needsUpdate = needSh;      /* needsUpdate habis per render, jadi di-set per scene */
+        renderer.render(W.scene, camera);
       });
       renderer.setScissorTest(false);
     }
   }
 
-  var last = performance.now(), frame = 0;
+  /* Ada yang perlu digambar? Kamera bergerak, UI berubah, pintu bergerak,
+     conveyor jalan, mesin menyala, atau hujan turun. Selain itu: diam. */
+  function wantsFrame(now) {
+    if (tween || dirty > 0 || ptrs.size > 0) return true;
+    if (now < doorAnimUntil) return true;
+    if (S.convOn || S.run) return true;
+    if (A.rain.obj.visible && S.rain > 0.02) return true;
+    return false;
+  }
+
+  var last = performance.now(), frame = 0, lastDrawAt = last, idle = true, fresh = true;
   function loop(now) {
     requestAnimationFrame(loop);
-    var dt = Math.min(0.05, (now - last) / 1000); last = now; frame++;
-    if (document.hidden) return;
-    stepTween(now);
+    if (document.hidden) { idle = true; return; }
+    if (!wantsFrame(now)) { idle = true; last = now; lastDrawAt = now; return; }
+    if (idle) { idle = false; last = now; lastDrawAt = now; fresh = true; }
+
+    var urgent = !!tween || dirty > 0 || ptrs.size > 0;
+    /* animasi latar (conveyor, forklift, hujan) cukup 30 fps — tak terlihat bedanya, hemat setengah GPU */
+    if (!urgent && now - lastDrawAt < ambientMs()) return;
+
+    var delta = now - lastDrawAt;
+    if (urgent && !fresh && delta < 120) sampleFrame(delta);
+    fresh = false;
+
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now; lastDrawAt = now; frame++;
+    if (dirty > 0) dirty--;
+    if (tween) stepTween(now);
+    shadowAnim = S.convOn || S.run || !!tween || now < doorAnimUntil;
     eachW(function (W) {
       W.wh.update(dt); W.model.update(dt, now / 1000); W.shelter.update(dt);
       if (W.rain.obj.visible) W.rain.update(dt);
@@ -3124,7 +3249,7 @@ function buildWarehouse(T, opts) {
   requestAnimationFrame(loop);
 
   if (document.fonts && document.fonts.load) {
-    var again = function () { eachW(function (W) { W.wh.redraw(); }); kick(); };
+    var again = function () { eachW(function (W) { W.wh.redraw(); }); touch(); };
     Promise.all([document.fonts.load('800 60px "Barlow Condensed"'), document.fonts.load('600 40px "Barlow Condensed"'), document.fonts.load('600 20px "IBM Plex Mono"')]).then(again).catch(function () { });
     document.fonts.ready.then(again);
   }

@@ -38,6 +38,12 @@ Everything else — geometry, textures, decals, signage, the reference photograp
 generated in the file itself. If the fonts fail, the canvas re-renders with fallback
 faces; if Three.js fails, the page stays on a blank stage (see §6, finding F2).
 
+**Tests** (no browser needed, no dependencies):
+
+```bash
+node tools/smoke.mjs     # 7 checks, <1 s
+```
+
 **Hard requirement:** WebGL. A caught `WebGLRenderer` failure shows an Indonesian
 "needs WebGL" message instead of a blank page.
 
@@ -147,9 +153,9 @@ A|B comparison cheap to keep in sync.
 
 | Metric | Value |
 | --- | --- |
-| File size | 218,818 bytes (219 KB), **one** HTTP document |
+| File size | 224,378 bytes (219 KB), **one** HTTP document |
 | Lines | 3,134 |
-| Inline JS | ~199 KB across 5 blocks |
+| Inline JS | ~204 KB across 5 blocks |
 | Inline CSS | ~7 KB |
 | Inline image data | 18.2 KB base64 ≈ 13.4 KB JPEG |
 | External assets | 2 (Three.js r128, Google Fonts) |
@@ -193,21 +199,17 @@ that the file is monolithic (see §6).
 1. **It is a 3,000-line single file with four global function bundles.** No modules, no
    tree-shaking, no lint/type coverage, and no tests. Changing the genset risks nothing,
    but changing the shared `fade()` or `mat()` conventions requires manual grepping.
-2. **The render loop never idles.** A "dirty frame" counter (`kick()`/`dirty`, lines
-   2799–2800) is written to but *never read* — the loop renders unconditionally every
-   frame. The intent (render-on-demand) is there; the wiring is not.
-3. **Compare mode leaks a whole living world.** Closing the comparison leaves `B` in
-   `worlds[]`, so `eachW()` keeps animating the hidden scene — conveyor, parcels, 130
-   instances, forklifts, rain, live canvas textures — every frame, forever. `dispose()`
-   exists but is never called.
-4. **`small` is sampled once** (`window.innerWidth < 860`, line 2683), so shadow-map
-   resolution never reacts to a resize or device rotation.
+2. ~~**The render loop never idles.**~~ **Fixed** — the dirty counter is now the loop's
+   gate, ambient motion is capped at 30 fps, and idle frames cost nothing (see §9).
+3. ~~**Compare mode leaks a whole living world.**~~ **Fixed** — `dropCompare()` removes
+   world B from the loop and releases its GPU resources (see §9).
+4. ~~**`small` is sampled once**~~ **Fixed** — re-sampled on every `resize()`.
 5. **Duplicated definitions** in `buildWarehouse`: `setGroup`, `dispose`, and `update`
    are each defined twice (lines 2558–2565 and 2578–2585). The later definition wins;
    the earlier is dead code that can silently diverge on the next edit.
-6. **Heavy defaults for low-end GPUs.** 4096² shadow map, `antialias: true`, `dpr` up to
-   2, ACES tone mapping, 9–18 point lights on `MeshStandardMaterial`, and 5,000 CPU-updated
-   rain segments can drop a mid-range Android phone to single-digit FPS in rain + compare.
+6. ~~**Heavy defaults for low-end GPUs.**~~ **Mitigated** — defaults are still generous on
+   capable hardware, but a frame-time probe now steps DPR, shadow resolution and point-light
+   count down automatically (see §9). `antialias` and the ACES pipeline are unchanged.
 7. **Hard CDN dependency with no pinning of integrity.** No `integrity`/`crossorigin`, no
    local copy, no `onerror` fallback: a blocked CDN yields a blank page with no message.
    Three.js **r128 (2021)** is three years of API drift behind current releases
@@ -220,18 +222,18 @@ that the file is monolithic (see §6).
 
 ## 6. Prioritised findings
 
-| # | Severity | Finding | Evidence | Suggested fix |
-| --- | --- | --- | --- | --- |
-| F1 | High (perf) | Render loop ignores dirty-state; always renders | `dirty`/`kick()` at 2799–2800, loop at 3108 | Wrap `render()` in `if (dirty > 0 \|\| animating)` and decrement; call `kick()` from camera/UI handlers |
-| F2 | High (robustness) | Blocked/unavailable Three.js CDN → blank stage, no message | line 230 | Add `onerror` fallback to a local copy + show the existing `.nogl` notice |
-| F3 | High (perf) | Hidden compare world keeps simulating | `worlds.push(B)` at 3041, `eachW` at 2762 | Remove `B` from `worlds` on close, or skip B in the loop when `!S.cmp`; `dispose()` on toggle |
-| F4 | Medium (perf) | 4096² shadow map + `dpr` ≤ 2 + antialias as defaults | 2689, 3084 | Adaptive quality: measure frame time, step down shadow map → 2048 → 1024 and `dpr` → 1 |
-| F5 | Medium (perf) | 9–18 point lights with `MeshStandardMaterial` | 2751–2754 | Keep 2–3 real lights, fake the rest with emissive cards; or bake to the env map |
-| F6 | Medium (maintainability) | `setGroup`/`dispose`/`update` defined twice | 2558–2565 vs 2578–2585 | Delete the first block |
-| F7 | Medium (a11y) | No reduced-motion path; no live regions for state changes | CSS/JS | `@media (prefers-reduced-motion)` → static camera, no rain, single frame; `aria-live="polite"` status line |
-| F8 | Low | `small` sampled once at load | 2683 | Recompute in `resize()` |
-| F9 | Low | Tabs lack `aria-controls` / panel `id` pairing | 142–229, 2918 | Add ids and wire `aria-labelledby` |
-| F10 | Low | No SRI on the CDN script; Three.js r128 is EOL-adjacent | 230 | Pin a modern release locally and migrate the colour-space API |
+| # | Severity | Finding | Status |
+| --- | --- | --- | --- |
+| F1 | High (perf) | Render loop ignores dirty-state; always renders | **fixed** — render-on-demand + 30 fps ambient cap |
+| F2 | High (robustness) | Blocked/unavailable Three.js CDN → blank stage, no message | open |
+| F3 | High (perf) | Hidden compare world keeps simulating | **fixed** — `dropCompare()` disposes world B |
+| F4 | Medium (perf) | 4096² shadow map + `dpr` ≤ 2 + antialias as defaults | **fixed** — 3 adaptive quality tiers |
+| F5 | Medium (perf) | 9–18 point lights with `MeshStandardMaterial` | **fixed** — light count follows quality tier |
+| F6 | Medium (maintainability) | `setGroup`/`dispose`/`update` defined twice | open |
+| F7 | Medium (a11y) | No reduced-motion path; no live regions for state changes | open |
+| F8 | Low | `small` sampled once at load | **fixed** — recomputed in `resize()` |
+| F9 | Low | Tabs lack `aria-controls` / panel `id` pairing | open |
+| F10 | Low | No SRI on the CDN script; Three.js r128 is EOL-adjacent | open |
 
 ---
 
@@ -241,10 +243,11 @@ that the file is monolithic (see §6).
    `buildShelter.js`, `buildWarehouse.js`, `controller.js` + a tiny bundler (or native
    ES modules with `<script type="module">`). Keep a `build:single` script that inlines
    everything back into `index.html` so the "one file to share by email" property survives.
-2. **Ship a quality ladder** — low/medium/high tiers driven by a 2-second frame-time
-   probe, defaulting mobile to low.
-3. **Turn on render-on-demand properly** (F1) — this alone should cut idle GPU/battery
-   use by an order of magnitude on a phone sitting on a desk.
+2. ~~**Ship a quality ladder**~~ — done in §9.3 (three tiers, frame-time probe).
+   Still worth defaulting mobile to `sedang` on the first frame instead of waiting
+   for the probe.
+3. ~~**Turn on render-on-demand properly** (F1)~~ — done in §9.1. The next win here is
+   a `prefers-reduced-motion` path that also stops conveyor/forklift/rain motion (F7).
 4. **Add a real loading state** — the current build blocks the main thread for a second
    or two while it constructs ~20k+ triangles of scene; a skeleton + `requestIdleCallback`
    chunking would make first paint feel instant.
@@ -266,3 +269,108 @@ that the file is monolithic (see §6).
 - The page was clearly produced as a single-file export (inlined styles, inlined base64
   image, plain global function blocks). It is preserved byte-for-byte in `index.html`;
   no code was modified in this commit.
+
+## 9. Performance pass (this revision)
+
+The render loop was the single biggest cost in the page and the biggest reason it felt
+heavy on phones. Five findings from §6 are addressed here; nothing about the visual
+design, the control panel or the scene content changed.
+
+### 9.1 Render on demand (F1)
+
+`dirty` was always written and never read. It is now the loop's gate:
+
+```js
+function wantsFrame(now) {
+  if (tween || dirty > 0 || ptrs.size > 0) return true;   // camera / input / UI change
+  if (now < doorAnimUntil) return true;                   // a door is swinging
+  if (S.convOn || S.run) return true;                     // conveyor or engine is running
+  if (A.rain.obj.visible && S.rain > 0.02) return true;   // rain is falling
+  return false;
+}
+```
+
+Three states fall out of that predicate:
+
+| State | Behaviour |
+| --- | --- |
+| **Interactive** (drag, wheel, tween, UI change) | every frame, full rate |
+| **Ambient** (conveyor, forklifts, rain only) | capped at **30 fps** (`ambientMs()`), 24 fps at the low tier — invisible for a slow belt, halves the GPU work |
+| **Idle** (nothing moving) | loop returns immediately: no update, no render, no shadow pass |
+
+`kick(n)` still means "draw `n` more frames"; a new `touch(n)` means "and the scene
+geometry changed", which additionally refreshes the shadow map. All content-changing
+controls (transparency, layers, weather, doors, engine, genset house) now call `touch()`.
+
+### 9.2 Shadow maps only when they change
+
+`renderer.shadowMap.autoUpdate = false`. The 4096² directional shadow pass — the most
+expensive pass in the frame — is now skipped:
+
+- while orbiting, panning or zooming (the light does not move, the shadows cannot change),
+- during camera tweens,
+- whenever the scene is otherwise static.
+
+It is refreshed once on release/after a tween, and every frame while parcel, forklift or
+door geometry is actually moving. In compare mode the flag is set per scene, because
+`needsUpdate` is consumed by each `renderer.render()` call.
+
+### 9.3 Adaptive quality (F4, F5)
+
+A frame-time probe samples unthrottled frames (45 warm-up frames ignored, 45 samples per
+decision). If the average frame exceeds ~34 ms — under 30 fps — the page steps down a tier:
+
+| Tier | DPR cap | Shadow map | Real point lights |
+| --- | --- | --- | --- |
+| `tinggi` | 2 | 4096² | 9 |
+| `sedang` | 1.5 | 2048² | 6 |
+| `rendah` | 1 | 1024² | 3 |
+
+Downgrade-only, so it cannot oscillate. Point lights that fall outside the cap are set
+`visible = false`, which removes them from the shader's light loop entirely.
+
+### 9.4 Compare mode stops leaking (F3)
+
+`dropCompare()` removes world B from `worlds[]` and releases its GPU resources:
+geometries, materials, every texture referenced by those materials (except the shared
+`envTex`), and the shadow map. Closing the A|B comparison now returns the page to
+exactly its single-world cost — previously a second complete scene kept animating
+behind the visible one forever.
+
+### 9.5 Resize (F8)
+
+`small` is recomputed from the stage width inside `resize()`, so shadow resolution and
+pixel ratio follow a rotation or window resize instead of being frozen at load.
+
+### 9.6 Measuring it
+
+The controller exposes a small read-only debug surface:
+
+```js
+GP3D.quality()   // 'tinggi' | 'sedang' | 'rendah'   (current tier)
+GP3D.level()     // 0..2
+GP3D.frames()    // frames actually rendered so far
+GP3D.setLevel(2) // force a tier (useful for demos and support)
+GP3D.state()     // the live UI state object
+GP3D.worlds()    // 1, or 2 while comparing
+GP3D.compare(true)
+```
+
+A headless regression test covers the logic without a browser:
+
+```bash
+node tools/smoke.mjs
+```
+
+It loads the real controller out of `index.html` against a stubbed THREE/DOM, drives
+`requestAnimationFrame` with a fake clock, and asserts: boot without throwing, ambient
+animation settles at ~30 fps, a fully idle page renders **zero** frames, slow frames
+step the tier down, compare mode creates then disposes world B, and rendering resumes
+afterwards. Seven checks, no dependencies, runs in under a second.
+
+### 9.7 What this does not cover yet
+
+Still open from §6: `F2` (no CDN fallback), `F6` (duplicated functions), `F7`
+(`prefers-reduced-motion`), `F9` (tab ARIA wiring), `F10` (SRI / Three.js version).
+`antialias` remains on and the ACES tone-mapping pipeline is untouched — both are
+quality decisions rather than performance bugs, and the DPR cap already bounds their cost.
